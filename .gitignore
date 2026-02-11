@@ -1,0 +1,48 @@
+## Ignore build outputs
+bin/
+obj/
+
+## Visual Studio and VS Code
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vscode/
+
+## Rider
+.idea/
+
+## NuGet
+packages/
+*.nupkg
+
+## Dotnet artifacts
+artifacts/
+project.lock.json
+project.fragment.lock.json
+
+## Logs and temp files
+*.log
+*.tmp
+*.temp
+*.cache
+
+## Publish output
+publish/
+
+## OS files
+Thumbs.db
+.DS_Store
+
+## Node
+node_modules/
+
+## Test result folders
+TestResults/
+
+## User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache

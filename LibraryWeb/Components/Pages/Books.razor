@@ -1,0 +1,272 @@
+@page "/books"
+@using LibraryWeb.Models
+@using LibraryWeb.Services
+@inject LibraryService LibraryService
+@inject UserSession Session
+@inject NavigationManager NavManager
+@rendermode InteractiveServer
+
+<h3>📚 Biblioteket</h3>
+
+@if (!Session.IsLoggedIn)
+{ // Inloggnings- och registreringsformulär
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card p-3 mb-3">
+                <h4>Logga in</h4>
+                <input class="form-control mb-2" @bind="loginEmail" placeholder="E-mail" />
+                <input type="password" class="form-control mb-2" @bind="loginPass" placeholder="Lösenord" />
+                <button class="btn btn-primary" @onclick="HandleLogin">Logga in</button>
+                <p class="text-danger mt-2">@loginMessage</p>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card p-3">
+                <h4>Skapa konto</h4>
+                <input class="form-control mb-2" @bind="regName" placeholder="Namn" />
+                <input class="form-control mb-2" @bind="regEmail" placeholder="E-mail" />
+                <input type="password" class="form-control mb-2" @bind="regPass" placeholder="Lösenord" />
+                <button class="btn btn-success" @onclick="HandleRegister">Registrera</button>
+                <p class="text-success mt-2">@regMessage</p>
+            </div>
+        </div>
+    </div>
+}
+else
+{ // Välkomstmeddelande och utloggningsknapp
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>Välkommen, @Session.CurrentUser?.Name! @(Session.IsAdmin ? "(ADMIN)" : "")</h4>
+        <button class="btn btn-outline-danger" @onclick="HandleLogout">Logga ut</button>
+    </div>
+
+    @if (Session.IsAdmin)
+    {
+        <div class="alert alert-warning">
+            <h5>👑 Admin-panel</h5>
+            <div class="input-group mb-3">
+                <input class="form-control" @bind="newTitle" placeholder="Titel" />
+                <input class="form-control" @bind="newAuthor" placeholder="Författare" />
+                <button class="btn btn-warning" @onclick="AddBook">Lägg till bok</button>
+            </div>
+            <p class="text-danger">@adminMessage</p>
+        </div>
+    }
+
+    <div class="mb-3">
+        <input class="form-control" @bind="searchTerm" @bind:event="oninput" placeholder="🔍 Sök efter bok..." />
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <h5>Böcker</h5>
+            <table class="table table-striped">
+                <thead>
+                    <tr><th>Titel</th><th>Författare</th><th>Status</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var book in FilteredBooks)
+                    {
+                        <tr>
+                            <td>@book.Title</td>
+                            <td>@book.Author</td>
+                            <td>@(book.IsAvailable ? "🟢" : "🔴")</td>
+                            <td>
+                                @if (book.IsAvailable)
+                                {
+                                    <button class="btn btn-sm btn-primary" @onclick="() => Loan(book.Id)">Låna</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card p-3 bg-light">
+                <h5>📖 Mina Lån</h5>
+                @if (myLoans == null || !myLoans.Any())
+                {
+                    <p>Inga lån.</p>
+                }
+                else
+                {
+                    <ul class="list-group">
+                        @foreach (var loan in myLoans)
+                        {
+                            <li class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>@loan.Book?.Title</strong><br/>
+                                        @if (loan.ReturnDate == null)
+                                        {
+                                            <small>Åter: @loan.DueDate.ToString("yyyy-MM-dd")</small>
+                                        }
+                                        else
+                                        {
+                                            <small class="text-success">Återlämnad ✅</small>
+                                        }
+                                    </div>
+                                    
+                                    @if (loan.ReturnDate == null)
+                                    {
+                                        <button class="btn btn-sm btn-outline-success" @onclick="() => ReturnBook(loan.Id)">
+                                            Lämna
+                                        </button>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Book> books = new();
+    private List<Loan> myLoans = new();
+    
+    // Fält för Login/Reg
+    private string loginEmail = "", loginPass = "", loginMessage = "";
+    private string regName = "", regEmail = "", regPass = "", regMessage = "";
+    
+    // Fält för Admin
+    private string newTitle = "", newAuthor = "", adminMessage = "";
+
+    // Fält för sökterm
+    private string searchTerm = "";
+
+    // Beräknad egenskap som filtrerar böcker baserat på sökterm
+    private IEnumerable<Book> FilteredBooks => 
+    string.IsNullOrWhiteSpace(searchTerm) ? books : books.Where(b => b.Matches(searchTerm));
+
+    // Ladda data när komponenten initieras
+    protected override async Task OnInitializedAsync() => await LoadData();
+    // Ladda alla böcker och användarens lån (om inloggad)
+    private async Task LoadData()
+    {
+        try 
+        {
+            books = await LibraryService.GetBooksAsync();
+            if (Session.IsLoggedIn)
+            {
+                myLoans = await LibraryService.GetLoansForMemberAsync(Session.CurrentUser!.Id);
+            }
+        }
+        catch (Exception) 
+        {
+            // Om databasen strular vid laddning, ignorera för att inte krascha sidan
+        }
+    }
+
+    // Hantera inloggning av medlem
+    private async Task HandleLogin()
+    {
+        try 
+        {
+            var member = await LibraryService.LoginAsync(loginEmail, loginPass);
+            if (member != null)
+            {
+                Session.Login(member);
+                loginMessage = "";
+                await LoadData();
+            }
+            else
+            {
+                loginMessage = "Fel e-mail eller lösenord.";
+            }
+        }
+        catch (Exception ex)
+        {
+            loginMessage = "Fel vid inloggning: " + ex.Message;
+        }
+    }
+
+    // Hantera registrering av nytt konto
+    private async Task HandleRegister()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(regName) || string.IsNullOrWhiteSpace(regEmail) || string.IsNullOrWhiteSpace(regPass))
+            {
+                regMessage = "Alla fält måste fyllas i.";
+                return;
+            }
+
+            var newMember = new Member { Name = regName, Email = regEmail, Password = regPass };
+            await LibraryService.RegisterMemberAsync(newMember);
+            
+            regMessage = "Konto skapat! Du kan nu logga in.";
+            regName = ""; regEmail = ""; regPass = "";
+        }
+        catch (Exception ex)
+        {
+            regMessage = "Kunde inte registrera: " + ex.Message;
+        }
+    }
+    // Logga ut och rensa lån-listan
+    private void HandleLogout()
+    {
+        Session.Logout();
+        myLoans.Clear();
+    }
+
+    private async Task AddBook()
+    {
+        // Endast admin kan lägga till böcker, och titel
+        try 
+        {
+            if (Session.IsAdmin && !string.IsNullOrWhiteSpace(newTitle))
+            {
+                var b = new Book 
+                { 
+                    Title = newTitle, 
+                    Author = newAuthor, 
+                    ISBN = "000", 
+                    PublishedYear = 2024 
+                };
+                
+                await LibraryService.AddBookAsync(b);
+                
+                newTitle = "";
+                newAuthor = "";
+                adminMessage = ""; // Rensa eventuella tidigare felmeddelanden
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            adminMessage = "Kunde inte spara boken: " + ex.Message;
+        }
+    }
+
+    private async Task Loan(int bookId)
+    {
+        try 
+        {
+            if (Session.IsLoggedIn)
+            {
+                await LibraryService.LoanBookAsync(bookId, Session.CurrentUser!.Id);
+                await LoadData();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Lån misslyckades: " + ex.Message);
+        }
+    }
+    private async Task ReturnBook(int loanId)
+    {
+        try 
+        {
+            await LibraryService.ReturnBookAsync(loanId);
+            await LoadData(); // Uppdatera listan så boken blir grön direkt
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Kunde inte återlämna: " + ex.Message);
+        }
+    }
+}
